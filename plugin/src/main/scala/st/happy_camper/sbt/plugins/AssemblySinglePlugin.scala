@@ -18,10 +18,60 @@ package st.happy_camper.sbt.plugins
 import sbt._
 import Keys._
 
+import scala.xml.XML
+
+import org.codehaus.plexus.archiver.tar.TarArchiver
+import org.codehaus.plexus.archiver.zip.ZipArchiver
+
 /**
  * @author ueshin
  *
  */
 object AssemblySinglePlugin extends Plugin {
+
+  import AssemblySingleKeys._
+
+  object AssemblySingleKeys {
+    val finalName = SettingKey[String]("final-name", "The final name of the dest file.")
+    val descriptors = SettingKey[Seq[File]]("descriptors", "A list of descriptor files to generate from.")
+
+    val assemblySingle = TaskKey[Seq[File]]("assembly-single", "Assemble dist files behaving like 'mvn assembly:single'")
+  }
+
+  override lazy val settings = Seq(
+    finalName <<= (name, version) { (name, version) => name + "-" + version },
+    descriptors := Nil,
+
+    assemblySingle <<= assemblySingleTask)
+
+  val assemblySingleTask = (name, version, target, finalName, descriptors) map { (name, version, target, finalName, descriptors) =>
+    descriptors.flatMap { descriptor =>
+      val xml = XML.loadFile(descriptor)
+      val id = (xml \\ "id").text
+      val archivers = (xml \\ "format").map(_.text).map { format =>
+        val archiver = format match {
+          case "zip" => new ZipArchiver
+          case "tar" => new TarArchiver
+          case "tar.gz" =>
+            val archiver = new TarArchiver
+            val compressionMethod = new TarArchiver.TarCompressionMethod
+            compressionMethod.setValue("gzip")
+            archiver.setCompression(compressionMethod)
+            archiver
+          case "tar.bz2" =>
+            val archiver = new TarArchiver
+            val compressionMethod = new TarArchiver.TarCompressionMethod
+            compressionMethod.setValue("bzip2")
+            archiver.setCompression(compressionMethod)
+            archiver
+        }
+        archiver.setDestFile(target / (finalName + "-" + id + "." + format))
+        archiver
+      }
+
+      archivers.foreach(_.createArchive)
+      archivers.map(_.getDestFile)
+    }
+  }
 
 }
